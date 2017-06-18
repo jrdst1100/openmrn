@@ -538,6 +538,23 @@ void CC32xxWiFi::set_default_state()
         sl_WlanPolicySet(SL_POLICY_CONNECTION,SL_CONNECTION_POLICY(1,0,0,0,0),
                          NULL,0); 
     }
+
+    /* mask all services from mDNS discovery */
+    uint32_t EventMask = 0; //0xFFFFF;
+    sl_NetAppSet(SL_NETAPP_MDNS_ID, SL_NETAPP_MDNS_QEVETN_MASK_OPT,
+                 sizeof(EventMask), (const unsigned char *)&EventMask);
+
+    /* setup MDNS timing */
+    SlNetAppServiceAdvertiseTimingParameters_t Timing;
+    Timing.t = 200; /* 2 seconds */
+    Timing.p = 2; /* 2 repetitions */
+    Timing.k = 2; /* Telescopic factor 2 */
+    Timing.RetransInterval = 0;
+    Timing.Maxinterval = 0xFFFFFFFF;
+    Timing.max_time = 5;
+
+    sl_NetAppSet(SL_NETAPP_MDNS_ID, SL_NETAPP_MDNS_TIMING_PARAMS_OPT,
+                 sizeof(Timing), (const unsigned char *)&Timing);
 }
 
 /*
@@ -1086,14 +1103,36 @@ std::string CC32xxWiFi::get_version() {
  */
 void mdns_publish(const char *name, const char *service, uint16_t port)
 {
-        string full_name(name);
-        full_name.push_back('.');
-        full_name.append(service);
-        full_name.append(".local");
-        sl_NetAppMDNSRegisterService((const signed char*)full_name.c_str(),
-                                     full_name.size(),
-                                     (const signed char*)"OLCB", strlen("OLCB"), 
-                                     port, 200, 0);
+    string full_name(name);
+    full_name.push_back('.');
+    full_name.append(service);
+    full_name.append(".local");
+#if 0
+#ifdef SL_API_V2
+#define SRVC_NAME (full_name.c_str())
+    sl_NetAppMDNSUnRegisterService((const signed char*)SRVC_NAME, strlen(SRVC_NAME),
+                                   SL_NETAPP_MDNS_OPTIONS_IS_NOT_PERSISTENT);
+    sl_NetAppMDNSUnRegisterService((const signed char*)SRVC_NAME, strlen(SRVC_NAME), 0);
+#endif
+#endif
+    sl_NetAppMDNSRegisterService((const signed char*)full_name.c_str(),
+                                 full_name.size(),
+                                 (const signed char*)"OLCB", strlen("OLCB"), 
+                                 port, 120,
+                                 /*SL_NETAPP_MDNS_OPTIONS_IS_UNIQUE_BIT |*/
+                                 SL_NETAPP_MDNS_OPTIONS_IS_NOT_PERSISTENT);
+}
+
+/* mdns_scan()
+ *
+ */
+void mdns_scan(const char *service)
+{
+    string full_name(service);
+    full_name.append(".local");
+    sl_NetAppSet(SL_NETAPP_MDNS_ID, SL_NETAPP_MDNS_CONT_QUERY_OPT,
+                 (unsigned char)full_name.size(),
+                 (const unsigned char *)full_name.c_str());
 }
 
 extern "C"

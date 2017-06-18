@@ -1079,7 +1079,6 @@ int getaddrinfo(const char *nodename, const char *servname,
     std::unique_ptr<struct sockaddr> sa(new struct sockaddr);
     if (sa.get() == nullptr)
     {
-        free(*res);
         return EAI_MEMORY;
     }
     memset(sa.get(), 0, sizeof(struct sockaddr));
@@ -1109,12 +1108,48 @@ int getaddrinfo(const char *nodename, const char *servname,
     }
     else
     {
+        /// @todo this only works for SL_AF_INET (IPV4)
+        std::unique_ptr<SlNetAppGetFullServiceIpv4List_t[]>
+            mdns_list(new SlNetAppGetFullServiceIpv4List_t[6]);
+
+        /* Get a list of discovered services */
+        result = sl_NetAppGetServiceList(0, 6,
+                                         SL_NETAPP_FULL_SERVICE_IPV4_TYPE,
+                                         (signed char *)mdns_list.get(),
+                                         sizeof(SlNetAppGetFullServiceIpv4List_t) * 6);
+        if (result >= 1)
+        {
+            for (int i = 0; i < result; ++i)
+            {
+                const char *service_name = (const char*)mdns_list[i].service_name;
+                if (!strstr(service_name, servname))
+                {
+                    continue;
+                }
+
+                struct sockaddr_in *sa_in = (struct sockaddr_in*)sa.get();
+                ai->ai_flags = 0;
+                ai->ai_family = hints->ai_family;
+                ai->ai_socktype = hints->ai_socktype;
+                ai->ai_protocol = hints->ai_protocol;
+                ai->ai_addrlen = sizeof(struct sockaddr_in);
+                ai->ai_canonname = new char[strlen(service_name) + 1];
+                strcpy(ai->ai_canonname, service_name);
+                sa_in->sin_family = hints->ai_family;
+                sa_in->sin_port = htons(mdns_list[i].service_port);
+                sa_in->sin_addr.s_addr = htonl(mdns_list[i].service_ipv4);
+                *res = ai.release();
+                (*res)->ai_addr = sa.release();
+                return 0;
+            }
+        }
+
         result = sl_NetAppDnsGetHostByService((int8_t*)servname,
                                               strlen(servname), domain, ip_addr,
                                               &port, &text_len, text);
     }
 
-    if (result != 0)
+    if (result < 0)
     {
         switch (result)
         {
